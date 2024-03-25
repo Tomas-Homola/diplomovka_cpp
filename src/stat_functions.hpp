@@ -19,4 +19,10 @@ namespace StatFunctions
 
 	double shannonIndex(const std::vector<double>& data);
 
+	double pointsBellow(const std::vector<double>& data, double z2);
+
+	double pointsAbove(const std::vector<double>& data, double z1);
+
+	double pointsBetween(const std::vector<double>& data, double z1, double z2);
+
 }

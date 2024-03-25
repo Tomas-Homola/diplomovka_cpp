@@ -129,3 +129,30 @@ double StatFunctions::shannonIndex(const std::vector<double>& data)
 
     return shannon;
 }
+
+double StatFunctions::pointsBellow(const std::vector<double>& data, double z2)
+{
+    if (data.size() == 1 && data[0] == 0.0)
+        return 0.0;
+
+    int pts = std::count_if(data.begin(), data.end(), 
+        [z2](double pt) {return (std::abs(pt - z2) < DBL_EPSILON || pt < z2); });
+    
+    return static_cast<double>(pts);
+}
+
+double StatFunctions::pointsAbove(const std::vector<double>& data, double z1)
+{
+    int pts = std::count_if(data.begin(), data.end(),
+        [z1](double pt) {return (std::abs(pt - z1) < DBL_EPSILON || pt > z1); });
+
+    return static_cast<double>(pts);
+}
+
+double StatFunctions::pointsBetween(const std::vector<double>& data, double z1, double z2)
+{
+    int pts = std::count_if(data.begin(), data.end(),
+        [z1,z2](double pt) {return (std::abs(pt - z1) < DBL_EPSILON || pt > z1) && (std::abs(pt - z2) < DBL_EPSILON || pt < z2); });
+
+    return static_cast<double>(pts);
+}
