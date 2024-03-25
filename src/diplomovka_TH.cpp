@@ -9,9 +9,17 @@ DataHandler::DataHandler(QWidget* parent)
 	int nprocs = 6;
 	omp_set_num_threads(nprocs);
 
-	QString infoFile = "E:/_school/_diplomovka/c++/91E0_area.kml_data.txt";
+	QString infoFile = "E:/_school/_diplomovka/c++/91F0_VysokaPriMorave.kml_data - Copy.txt";
 	
 	//std::vector<double> v = { 1.0,2.0,3.0,6.0,6.0,7.0,11.0,12.0,15.0,16.0,19.0,19.0,20.0,21.0,23.0,27.0,30.0,34.0,36.0,40.0 };
+	//std::vector<double> v2 = { 0.0 };
+
+	//std::cout << "v ->  Bellow 5: " << (double)StatFunctions::pointsBellow(v, 5.0) / v.size() << "\n";
+	//std::cout << "v2 -> Bellow 5: " << (double)StatFunctions::pointsBellow(v2, 5.0) / v2.size() << "\n";
+	
+	//int t = 0;
+	//std::cout << "0.0 / NAN = " << 0.0 / NAN << "\n";
+	//std::cout << "0.0 / 0 = " << 0.0 / t << "\n";
 
 	performCalculation(infoFile);
 
@@ -72,6 +80,7 @@ bool DataHandler::readLazFiles()
 
 	int nPixels = m_areaInfo.width_n * m_areaInfo.height_n;
 	m_meshPixels.resize(nPixels, PixelPoints());
+	m_DTM = new double[nPixels] { 0.0 };
 
 	auto start = std::chrono::high_resolution_clock::now();
 
@@ -183,6 +192,8 @@ void DataHandler::normalizePoints()
 #pragma omp parallel for private(minZ, minV, minG, noGroundPts, noVegetationPts)
 	for (int i = 0; i < m_meshPixels.size(); i++)
 	{
+		m_DTM[i] = NAN;
+
 		// Check if there are points in pixel
 		noGroundPts = m_meshPixels[i].groundPts.zCoords.empty();
 		noVegetationPts = m_meshPixels[i].vegetationPts.zCoords.empty();
@@ -201,6 +212,8 @@ void DataHandler::normalizePoints()
 			minV = *std::min_element(m_meshPixels[i].vegetationPts.zCoords.begin(), m_meshPixels[i].vegetationPts.zCoords.end());
 
 		minZ = (minG < minV) ? minG : minV;
+
+		m_DTM[i] = StatFunctions::mean(m_meshPixels[i].groundPts.zCoords);
 
 		for (auto& z : m_meshPixels[i].vegetationPts.zCoords)
 		{
@@ -315,26 +328,33 @@ void DataHandler::redistributePoints()
 void DataHandler::computeMetrics()
 {
 	int nPixels = m_areaInfo.width * m_areaInfo.height;
-	std::cout << "nPixels:" << nPixels << "\n";
 
+	std::cout << "Compute metrics started...\n";
 	auto start = std::chrono::high_resolution_clock::now();
 
-	m_metrics.resize(1);
-	for (int i = 0; i < m_metrics.size(); i++)
+	m_metrics.resize(nMetrics);
+	for (int i = 0; i < nMetrics; i++)
 	{
 		m_metrics[i] = new double[nPixels] {};
 	}
 
-	double maxZ = -1.0;
+	double meanZ = -1.0, varZ = -1.0, stdZ = -1.0;
 	int nAllPts = -1;
 	int nGroundPts = -1;
 	int nVegetationPts = -1;
+	double temp = -1.0;
 	std::vector<double>* zValues = nullptr;
+	int m = 0;
 
-#pragma omp parallel for private(zValues, nGroundPts, nVegetationPts, nAllPts, maxZ)
+#pragma omp parallel for private(zValues, nGroundPts, nVegetationPts, nAllPts, meanZ, varZ, stdZ, temp, m)
 	for (int i = 0; i < nPixels; i++)
 	{
-		m_metrics[0][i] = NAN;
+		std::vector<double> emptyZ = { 0.0 };
+
+		// set default metrics value to NAN
+		for (m = 0; m < nMetrics; m++)
+			m_metrics[m][i] = NAN;
+		//std::cout << "nans assigned\n";
 
 		zValues = &m_meshPixelsRedistributed[i].vegetationPts.zCoords;
 
@@ -342,27 +362,88 @@ void DataHandler::computeMetrics()
 		nVegetationPts = zValues->size();
 		nAllPts = nGroundPts + nVegetationPts;
 
+		//std::cout << "nPoints found\n";
 
 		if (nAllPts == 0)
 			continue;
 
-		// PPR
-		//m_metrics[1][i] = static_cast<double>(nGroundPts) / nAllPts;
-
 		if (nVegetationPts == 0)
-			maxZ = 0.0;
-		else
-			maxZ = *std::max_element(zValues->begin(), zValues->end());
+			zValues = &emptyZ;
 
+		// ECOSYSTEM HEIGHT METRICS
+		m_metrics[Hmax][i] = *std::max_element(zValues->begin(), zValues->end());
+
+		meanZ = StatFunctions::mean(*zValues);
+		m_metrics[Hmean][i] = meanZ;
+
+		m_metrics[Hmedian][i] = StatFunctions::percentile(*zValues, 50.0);
+
+		m_metrics[Hp25][i] = StatFunctions::percentile(*zValues, 25.0);
+
+		m_metrics[Hp75][i] = StatFunctions::percentile(*zValues, 75.0);
+
+		m_metrics[Hp95][i] = StatFunctions::percentile(*zValues, 95.0);
+
+		m_metrics[PPR][i] = static_cast<double>(nGroundPts) / nAllPts;
+
+		temp = StatFunctions::pointsAbove(*zValues, meanZ);
+		m_metrics[DAM_z][i] = (nVegetationPts == 0) ? 0.0 : temp;
+
+		//std::cout << "Metrics 1/3 done\n";
+
+		// ECOSYSTEM COVER METRICS
+		temp = StatFunctions::pointsBellow(*zValues, 1.0);
+		m_metrics[BR_bellow_1][i] = (nVegetationPts == 0) ? 0.0 : temp / nVegetationPts;
+
+		temp = StatFunctions::pointsBetween(*zValues, 1.0, 2.0);
+		m_metrics[BR_1_2][i] = (nVegetationPts == 0) ? 0.0 : temp / nVegetationPts;
 		
-		// Hmax
-		m_metrics[0][i] = maxZ;
+		temp = StatFunctions::pointsBetween(*zValues, 2.0, 3.0);
+		m_metrics[BR_2_3][i] = (nVegetationPts == 0) ? 0.0 : temp / nVegetationPts;
+		
+		temp = StatFunctions::pointsAbove(*zValues, 3.0);
+		m_metrics[BR_above_3][i] = (nVegetationPts == 0) ? 0.0 : temp / nVegetationPts;
+		
+		temp = StatFunctions::pointsBetween(*zValues, 3.0, 4.0);
+		m_metrics[BR_3_4][i] = (nVegetationPts == 0) ? 0.0 : temp / nVegetationPts;
+		
+		temp = StatFunctions::pointsBetween(*zValues, 4.0, 5.0);
+		m_metrics[BR_4_5][i] = (nVegetationPts == 0) ? 0.0 : temp / nVegetationPts;
+		
+		temp = StatFunctions::pointsBellow(*zValues, 5.0);
+		m_metrics[BR_bellow_5][i] = (nVegetationPts == 0) ? 0.0 : temp / nVegetationPts;
+		
+		temp = StatFunctions::pointsBetween(*zValues, 5.0, 20.0);
+		m_metrics[BR_5_20][i] = (nVegetationPts == 0) ? 0.0 : temp / nVegetationPts;
+		
+		temp = StatFunctions::pointsAbove(*zValues, 20.0);
+		m_metrics[BR_above_20][i] = (nVegetationPts == 0) ? 0.0 : temp / nVegetationPts;
+		
+		//std::cout << "Metrics 2/3 done\n";
+
+		// ECOSYSTEM STRUCTURAL COMPLEXITY METRICS
+		m_metrics[Hkurt][i] = StatFunctions::kurtosis(*zValues, meanZ);
+
+		m_metrics[Hskew][i] = StatFunctions::skewness(*zValues, meanZ);
+
+		varZ = StatFunctions::variance(*zValues, meanZ);
+		m_metrics[Hvar][i] = varZ;
+
+		stdZ = std::sqrt(varZ);
+		m_metrics[Hstd][i] = stdZ;
+
+		m_metrics[Coeff_var_z][i] = stdZ / meanZ;
+
+		m_metrics[Shannon][i] = StatFunctions::shannonIndex(*zValues);
+
+		//std::cout << "Metrics 3/3 done\n";
+
 	}
 
 	auto end = std::chrono::high_resolution_clock::now();
 	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
 
-	printf("\nCompute metrics: %.4lf s\n", (double)duration.count() / 1000.0);
+	printf("done: %.4lf s\n", (double)duration.count() / 1000.0);
 }
 
 void DataHandler::exportMetrics(std::string fileName)
@@ -370,7 +451,7 @@ void DataHandler::exportMetrics(std::string fileName)
 	time_t now = time(0);
 	tm* ltm = localtime(&now);
 	
-	std::string timeStamp = QString("%1_%2_%3_%4-%5-%6_").arg(ltm->tm_year + 1900,4).arg(ltm->tm_mon,2, 10, QLatin1Char('0')).arg(ltm->tm_mday, 2, 10, QLatin1Char('0')).arg(ltm->tm_hour, 2, 10, QLatin1Char('0')).arg(ltm->tm_min, 2, 10, QLatin1Char('0')).arg(ltm->tm_sec, 2, 10, QLatin1Char('0')).toStdString();
+	std::string timeStamp = QString("../../%1_%2_%3_%4-%5-%6_").arg(ltm->tm_year + 1900,4).arg(ltm->tm_mon,2, 10, QLatin1Char('0')).arg(ltm->tm_mday, 2, 10, QLatin1Char('0')).arg(ltm->tm_hour, 2, 10, QLatin1Char('0')).arg(ltm->tm_min, 2, 10, QLatin1Char('0')).arg(ltm->tm_sec, 2, 10, QLatin1Char('0')).toStdString();
 	timeStamp.append(fileName);
 	fileName = timeStamp;
 	fileName.append(QString("_h=%1m").arg(m_areaInfo.desiredPixelSize).toStdString());
@@ -392,11 +473,11 @@ void DataHandler::exportMetrics(std::string fileName)
 
 	// geotransform -> x,y lavy horny vrchol, dlzky v metroch pre pixely, rotacie (tie su 0)
 	double adfGeoTransform[6] = { m_areaInfo.xLeft,
-								  m_areaInfo.desiredPixelSize,
-		                          0,
+								  static_cast<double>(m_areaInfo.desiredPixelSize),
+		                          0.0,
 		                          m_areaInfo.yLeft,
-		                          0,
-		                         -m_areaInfo.desiredPixelSize };
+		                          0.0,
+		                         static_cast<double>(- m_areaInfo.desiredPixelSize)};
 	poDstDS->SetGeoTransform(adfGeoTransform);
 
 	// Spatial reference system for tif
@@ -417,7 +498,93 @@ void DataHandler::exportMetrics(std::string fileName)
 		poBand->RasterIO(GF_Write, 0, 0, m_areaInfo.width, m_areaInfo.height,
 			m_metrics[i], m_areaInfo.width, m_areaInfo.height, GDT_Float64, 0, 0);
 	}
+
+	//poDstDS->SetMetadata();
+	// Close file
+	GDALClose((GDALDatasetH)poDstDS);
+
+	std::cout << " done\n";
+}
+
+bool DataHandler::exportLAS(std::string fileName)
+{
+	if (fileName.substr(fileName.length() - 4, 4) != ".las")
+	{
+		fileName.append(".las");
+	}
+
+	LASwriteOpener lasWriteOpener;
+	lasWriteOpener.set_file_name(fileName.c_str());
+
+	if (!lasWriteOpener.active())
+	{
+		std::cout << "Las file " << lasWriteOpener.get_file_name() << "not active\n";
+		return false;
+	}
+
+	LASheader lasHeader;
+
+	lasHeader.x_scale_factor = 1.0;
+	lasHeader.y_scale_factor = 1.0;
+	lasHeader.z_scale_factor = 1.0;
+	lasHeader.x_offset = 0.0;
+	lasHeader.y_offset = 0.0;
+	lasHeader.z_offset = 0.0;
+	lasHeader.point_data_format;
+
+	return true;
+}
+
+void DataHandler::exportDTM(std::string fileName)
+{
+	time_t now = time(0);
+	tm* ltm = localtime(&now);
+
+	std::string timeStamp = QString("../../DTM_%1_%2_%3_%4-%5-%6_").arg(ltm->tm_year + 1900, 4).arg(ltm->tm_mon, 2, 10, QLatin1Char('0')).arg(ltm->tm_mday, 2, 10, QLatin1Char('0')).arg(ltm->tm_hour, 2, 10, QLatin1Char('0')).arg(ltm->tm_min, 2, 10, QLatin1Char('0')).arg(ltm->tm_sec, 2, 10, QLatin1Char('0')).toStdString();
+	timeStamp.append(fileName);
+	fileName = timeStamp;
+
+	if (fileName.substr(fileName.length() - 4, 4) != ".tif")
+	{
+		fileName.append(".tif");
+	}
+
+	std::cout << "Exporting DTM...";
+	// load drivers
+	GDALAllRegister();
+	GDALDriver* poDriver;
+	poDriver = GetGDALDriverManager()->GetDriverByName("GTiff");
+
+	GDALDataset* poDstDS = nullptr;
+	char** papszOptions = NULL;
+	poDstDS = poDriver->Create(fileName.c_str(), m_areaInfo.width_n, m_areaInfo.height_n, 1, GDT_Float64, papszOptions);
+
+	// geotransform -> x,y lavy horny vrchol, dlzky v metroch pre pixely, rotacie (tie su 0)
+	double adfGeoTransform[6] = { m_areaInfo.xLeft,
+								  1.0,
+								  0.0,
+								  m_areaInfo.yLeft,
+								  0.0,
+								  -1.0 };
+	poDstDS->SetGeoTransform(adfGeoTransform);
+
+	// Spatial reference system for tif
+	OGRSpatialReference oSRS;
+	char* pszSRS_WKT = NULL;
+	oSRS.importFromEPSG(8353);
+	oSRS.exportToWkt(&pszSRS_WKT);
+	poDstDS->SetProjection(pszSRS_WKT);
+	CPLFree(pszSRS_WKT);
+
+	// Export bands
+	GDALRasterBand* poBand;
+
+	poBand = poDstDS->GetRasterBand(1);
+	poBand->SetDescription("Digital Terrain Model");
+	poBand->RasterIO(GF_Write, 0, 0, m_areaInfo.width_n, m_areaInfo.height_n,
+		m_DTM, m_areaInfo.width_n, m_areaInfo.height_n, GDT_Float64, 0, 0);
 	
+	//poDstDS->SetMetadata();
 	// Close file
 	GDALClose((GDALDatasetH)poDstDS);
 
@@ -447,11 +614,6 @@ void DataHandler::performCalculation(QString infoFile)
 	std::cout << "(x,y): [" << m_areaInfo.xLeft << ", " << m_areaInfo.yLeft << "]\n";
 	std::cout << "laz files: " << m_areaInfo.lazFiles.size() << "\n";
 
-	/*for (size_t i = 0; i < m_areaInfo.lazFiles.size(); i++)
-	{
-		std::cout << "file " << i << ": " << m_areaInfo.lazFiles[i] << "\n";
-	}*/
-
 	if (!readLazFiles())
 	{
 		std::cout << "failed to read laz files\n";
@@ -459,6 +621,8 @@ void DataHandler::performCalculation(QString infoFile)
 	}
 
 	normalizePoints();
+
+	exportDTM(m_areaName);
 
 	redistributePoints();
 

@@ -63,6 +63,8 @@
 #define Hvar 21
 #define Shannon 22
 
+#define nMetrics 23
+
 struct AreaInfo
 {
 	int width_n = -1;
@@ -112,6 +114,7 @@ private:
 	std::vector<PixelPoints> m_meshPixelsRedistributed;
 	std::vector<double*> m_metrics;
 	std::string m_areaName = "";
+	double* m_DTM = nullptr;
 
 	std::vector<std::string> m_bandNames = { "Hmax","Hmean","Hmedian","Hp25","Hp75","Hp95","PPR","DAM_z","BR_bellow_1","BR_1_2","BR_2_3","BR_above_3","BR_3_4","BR_4_5","BR_bellow_5","BR_5_20","BR_above_20","Coeff_var_z","Hkurt","Hskew","Hstd","Hvar","Shannon" };
 
@@ -126,6 +129,10 @@ private:
 	void computeMetrics();
 
 	void exportMetrics(std::string fileName);
+
+	bool exportLAS(std::string fileName);
+
+	void exportDTM(std::string fileName);
 
 	void performCalculation(QString infoFile);
 };
